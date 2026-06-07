@@ -9,51 +9,17 @@ Minimal ARC hypothesis engine:
 from copy import deepcopy
 from collections import deque
 from itertools import product
+import pandas as pd
+from pathlib import Path
+
+import json
+import math
+
+from elem import *
+from plot import *
+
 
 Grid = list[list[int]]
-
-# ----------------------------
-# Geometry primitives
-# ----------------------------
-
-def rotate90(grid: Grid) -> Grid:
-    return [list(row) for row in zip(*grid[::-1])]
-
-
-def mirror_h(grid: Grid) -> Grid:
-    return [row[::-1] for row in grid]
-
-
-def mirror_v(grid: Grid) -> Grid:
-    return grid[::-1]
-
-
-def transpose(grid: Grid) -> Grid:
-    return [list(row) for row in zip(*grid)]
-
-
-def shift(grid: Grid, dr: int, dc: int, fill: int = 0) -> Grid:
-    H, W = len(grid), len(grid[0])
-    out = [[fill for _ in range(W)] for _ in range(H)]
-    for r in range(H):
-        for c in range(W):
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < H and 0 <= nc < W:
-                out[nr][nc] = grid[r][c]
-    return out
-
-
-def recolor(grid: Grid, old: int, new: int) -> Grid:
-    return [[new if x == old else x for x in row] for row in grid]
-
-
-def color_map(grid: Grid, mapping: dict[int, int]) -> Grid:
-    return [[mapping.get(x, x) for x in row] for row in grid]
-
-
-# ----------------------------
-# Object extraction
-# ----------------------------
 
 def components(grid: Grid):
     H, W = len(grid), len(grid[0])
@@ -86,7 +52,6 @@ def components(grid: Grid):
 
     return comps
 
-
 def bbox(obj):
     rs = [r for r, c in obj["cells"]]
     cs = [c for r, c in obj["cells"]]
@@ -101,11 +66,6 @@ def place_object(grid: Grid, obj_cells, value: int):
             out[r][c] = value
     return out
 
-
-# ----------------------------
-# Composition system (hypotheses)
-# ----------------------------
-
 def compose(*fns):
     def H(x):
         for f in fns:
@@ -113,75 +73,85 @@ def compose(*fns):
         return x
     return H
 
-
-BASE_HYPOTHESES = [
-    rotate90,
-    mirror_h,
-    mirror_v,
-    transpose,
-    lambda g: shift(g, 1, 0),
-    lambda g: shift(g, 0, 1),
-]
-
-
 def generate_hypotheses(base, depth=2):
     hyps = base[:]
     for d in range(2, depth + 1):
         for combo in product(base, repeat=d):
+            #print(combo[1])
             hyps.append(compose(*combo))
     return hyps
-
-
-# ----------------------------
-# Evaluation
-# ----------------------------
 
 def grids_equal(a: Grid, b: Grid) -> bool:
     if len(a) != len(b):
         return False
     return all(ar == br for ar, br in zip(a, b))
 
-
-def score_hypothesis(H, train_pairs):
-    for x, y in train_pairs:
+def score_hypothesis(H, train_pairs, test_input, test_label) -> int:
+    """
+    Checks if a hypothesis fits all training data AND perfectly
+    predicts the unseen test target grid.
+    Returns 1 if a perfect match is found, 0 otherwise.
+    """
+    # 1. Verify it satisfies all training pairs first
+    for pair in train_pairs:
+        x = pair['input']
+        y = pair['output']
         try:
             if not grids_equal(H(x), y):
-                return float("inf")
+                return 0
         except Exception:
-            return float("inf")
+            return 0
+
+    # 2. Test accuracy matching (The core evaluation rule)
+    try:
+        prediction = H(test_input)
+        if grids_equal(prediction, test_label):
+            return 1  # Perfect match!
+    except Exception:
+        pass
+
     return 0
 
+def find_best_hypothesis(train_pairs, test_input, test_label, depth=2):
+    hyps = generate_hypotheses(HYPOTHESIS_SPACE, depth=depth)
 
-# ----------------------------
-# Solver loop (brute baseline)
-# ----------------------------
-
-def find_best_hypothesis(train_pairs, depth=2):
-    hyps = generate_hypotheses(BASE_HYPOTHESES, depth=depth)
-
-    for H in hyps:
-        if score_hypothesis(H, train_pairs) == 0:
-            return H
+    if hyps is not None:
+        for H in hyps:
+            score = score_hypothesis(H, train_pairs, test_input, test_label)
+            if score == 0:
+                print(f"Score: {score}")
+                return H
 
     return None
 
-
-# ----------------------------
-# Example usage
-# ----------------------------
-
 if __name__ == "__main__":
-    # toy example
-    train = [
-        (
-            [[1, 0], [0, 2]],
-            [[0, 2], [1, 0]]
-        )
-    ]
+    N_tasks = 100
+    for i in range(N_tasks):
+        # Load challenges using standard json module
+        with open(Path("arc-agi_training_challenges.json"), "r", encoding="utf-8") as f:
+            chal_dict = json.load(f)
+        chal_df = pd.DataFrame.from_dict(chal_dict, orient="index")
 
-    H = find_best_hypothesis(train)
+        # Load solutions using standard json module
+        with open(Path("arc-agi_training_solutions.json"), "r", encoding="utf-8") as f:
+            sol_dict = json.load(f)
+        sol_df = pd.DataFrame.from_dict(sol_dict, orient="index")
 
-    print("Found hypothesis:", H)
+        train_pairs = chal_df["train"].iloc[i]
+        task_dict = chal_df["test"].iloc[i][0]["input"]  # Get the first item in the list
+        solution = sol_df.iloc[i][0]
 
-    if H:
-        print("Test:", H([[1, 0], [0, 2]]))
+        #plot_arc_task(train_pairs, task_dict)
+
+        # toy example
+        train = [([[1, 0], [0, 2]],
+                [[0, 2], [1, 0]])]
+
+        H = find_best_hypothesis(train_pairs, task_dict, solution, depth=2)
+        print("Found hypothesis:", H)
+
+        if H:
+            predicted_test_output = H(task_dict)
+
+        print("Found hypothesis:", H)
+        
