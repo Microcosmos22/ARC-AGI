@@ -22,7 +22,6 @@ def permute_rnd_all_(query):
     permutation = np.random.permutation(10).tolist()
     return 'permute' + ''.join(map(str, permutation))
 
-
 class ArcDataset:
     @staticmethod
     def forward_mod(a, key, use_perm=True):
@@ -126,3 +125,35 @@ class ArcDataset:
         query = formatter.fmt_query(self.queries[key]['test'])
         reply = formatter.fmt_reply(self.replies[key]) if key in self.replies else None
         return train, query, reply
+
+
+def hashable(guess):
+    return tuple(map(tuple, guess))
+
+def score_sum(guesses, getter):
+    guess_list = list(guesses.values())
+    scores = {}
+    for g in guess_list:
+        h = hashable(g["solution"])
+        x = scores[h] = scores.get(h, [[], g["solution"]])
+        x[0].append(g)
+    scores = [(getter(sc), o) for sc, o in scores.values()]
+    scores = sorted(scores, key=(lambda x: x[0]), reverse=True)
+    ordered_outputs = [x[-1] for x in scores]
+    return ordered_outputs
+
+def getter_full_probmul_3(guesses, baseline=3):
+    inf_score = np.sum([baseline-g["beam_score"] for g in guesses])
+    aug_score = np.mean([np.sum([baseline-s for s in g["score_aug"]]) for g in guesses])
+    return inf_score + aug_score
+
+def score_full_probmul_3(guesses):
+    return score_sum(guesses, getter_full_probmul_3)
+
+def getter_kgmon(guesses):
+    inf_score = len(guesses)
+    aug_score = np.mean([np.mean(g["score_aug"]) for g in guesses])
+    return inf_score - aug_score
+
+def score_kgmon(guesses):
+    return score_sum(guesses, getter_kgmon)
