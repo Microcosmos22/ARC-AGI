@@ -86,54 +86,77 @@ def grids_equal(a: Grid, b: Grid) -> bool:
         return False
     return all(ar == br for ar, br in zip(a, b))
 
-def score_hypothesis(H, train_pairs, test_input, test_label) -> int:
+def compute_accuracy_score(H, train_pairs):
     """
-    Checks if a hypothesis fits all training data AND perfectly
-    predicts the unseen test target grid.
-    Returns 1 if a perfect match is found, 0 otherwise.
+    Counts the total number of correct pixels across all training pairs.
+    Returns: (correct_pixels, total_pixels)
     """
-    # 1. Verify it satisfies all training pairs first
+    total_correct = 0
+    total_pixels = 0
+
     for pair in train_pairs:
         x = pair['input']
         y = pair['output']
+
         try:
-            if not grids_equal(H(x), y):
-                return 0
+            pred = H(x)
+
+            # If dimensions do not match target, 0 pixels are correct for this pair
+            if len(pred) != len(y) or len(pred[0]) != len(y[0]):
+                total_pixels += len(y) * len(y[0])
+                continue
+
+            # Count matches row by row, pixel by pixel
+            for r in range(len(y)):
+                for c in range(len(y[0])):
+                    total_pixels += 1
+                    if pred[r][c] == y[r][c]:
+                        total_correct += 1
+
         except Exception:
-            return 0
+            # If the function crashes, it gets 0 correct pixels for this pair
+            total_pixels += len(y) * len(y[0])
+            continue
 
-    # 2. Test accuracy matching (The core evaluation rule)
-    try:
-        prediction = H(test_input)
-        if grids_equal(prediction, test_label):
-            return 1  # Perfect match!
-    except Exception:
-        pass
+    return total_correct, total_pixels
 
-    return 0
+def find_best_hypothesis_by_score(train_pairs):
+    """
+    Loops through the primitive HYPOTHESIS_SPACE, tests each one,
+    and returns the function that achieves the highest pixel accuracy.
+    """
+    best_H = None
+    best_pixel_count = -1
 
-def find_best_hypothesis(train_pairs, test_input, test_label, depth=2):
-    hyps = generate_hypotheses(HYPOTHESIS_SPACE, depth=depth)
+    print(f"\nEvaluating {len(HYPOTHESIS_SPACE)} primitive functions...")
 
-    if hyps is not None:
-        for H in hyps:
-            score = score_hypothesis(H, train_pairs, test_input, test_label)
-            if score == 0:
-                print(f"Score: {score}")
-                return H
+    for H in HYPOTHESIS_SPACE:
+        fn_name = H.__name__ if hasattr(H, '__name__') else "unknown_function"
 
-    return None
+        correct, total = compute_accuracy_score(H, train_pairs)
+        accuracy_pct = (correct / total * 100) if total > 0 else 0
+
+        #print(f"-> {fn_name:<25} | Correct Pixels: {correct}/{total} ({accuracy_pct:.1f}%)")
+
+        # Track the function that got the most pixels correct
+        if correct > best_pixel_count:
+            best_pixel_count = correct
+            best_H = H
+
+    print(f"\n🏆 Winner chosen: {best_H.__name__ if best_H else 'None'} with {best_pixel_count} correct pixels.")
+    return best_H
+
 
 if __name__ == "__main__":
-    N_tasks = 100
+    N_tasks = 10
     for i in range(N_tasks):
         # Load challenges using standard json module
-        with open(Path("arc-agi_training_challenges.json"), "r", encoding="utf-8") as f:
+        with open(Path("../data/arc-agi_training_challenges.json"), "r", encoding="utf-8") as f:
             chal_dict = json.load(f)
         chal_df = pd.DataFrame.from_dict(chal_dict, orient="index")
 
         # Load solutions using standard json module
-        with open(Path("arc-agi_training_solutions.json"), "r", encoding="utf-8") as f:
+        with open(Path("../data/arc-agi_training_solutions.json"), "r", encoding="utf-8") as f:
             sol_dict = json.load(f)
         sol_df = pd.DataFrame.from_dict(sol_dict, orient="index")
 
@@ -147,11 +170,10 @@ if __name__ == "__main__":
         train = [([[1, 0], [0, 2]],
                 [[0, 2], [1, 0]])]
 
-        H = find_best_hypothesis(train_pairs, task_dict, solution, depth=2)
+        H = find_best_hypothesis_by_score(train_pairs)#, task_dict, solution)
         print("Found hypothesis:", H)
 
         if H:
             predicted_test_output = H(task_dict)
 
         print("Found hypothesis:", H)
-        

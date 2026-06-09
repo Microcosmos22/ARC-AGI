@@ -1,4 +1,4 @@
-import time
+dimport time
 global_end_time = time.time() + 12*3600 - 1200
 
 !pip uninstall -y tensorflow
