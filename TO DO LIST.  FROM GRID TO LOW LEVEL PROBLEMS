@@ -1,0 +1,217 @@
+What you're seeing now is a typical progression:
+
+Empty output
+Correct output length
+Correct separators / formatting
+Correct dimensions
+Some local patterns
+Actual rule learning
+
+The jump from (4) to (6) is the hard part.
+
+First: be realistic about Qwen + LoRA on ARC
+
+A language model sees:
+
+03330
+38883
+...
+
+as tokens, not as objects.
+
+ARC rules are often:
+
+find connected components
+identify largest object
+detect symmetry
+count objects
+move object until collision
+recolor object based on another object
+
+These are object-centric operations, not sequence operations.
+
+So you need to make object structure easier to learn.
+
+Priority 1: Stop flattening the grid
+
+If you're still encoding as:
+
+03330|38883|...
+
+that's already much better than a flat string, but it's still weak.
+
+At minimum use:
+
+0 3 3 3 0
+3 8 8 8 3
+...
+
+so individual cells are separated.
+
+Priority 2: Give all training examples together
+
+Many ARC tasks have:
+
+train_1 -> output_1
+train_2 -> output_2
+train_3 -> output_3
+
+test -> ?
+
+But earlier your code looked like it was creating one training row per example:
+
+for x_in, x_out in zip(train_in, train_out):
+    rows.append(...)
+
+That teaches:
+
+single example mapping
+
+instead of:
+
+infer common rule from multiple demonstrations
+
+For ARC, the prompt should look more like:
+
+Example 1
+INPUT:
+...
+
+OUTPUT:
+...
+
+Example 2
+INPUT:
+...
+
+OUTPUT:
+...
+
+Example 3
+INPUT:
+...
+
+OUTPUT:
+...
+
+TEST INPUT:
+...
+
+OUTPUT:
+
+This is probably the highest-impact change you can make right now.
+
+Priority 3: Encode objects, not pixels
+
+Instead of:
+
+03330
+38883
+...
+
+extract components:
+
+Object A:
+color=8
+bbox=(3,5)-(7,9)
+
+Object B:
+color=1
+bbox=(12,2)-(14,6)
+
+Now the model can reason over entities.
+
+This is where many successful ARC systems gain leverage.
+
+Priority 4: Predict reasoning traces
+
+Train targets as:
+
+RULE:
+The largest blue object is mirrored horizontally.
+
+OUTPUT:
+...
+
+instead of only:
+
+OUTPUT:
+...
+
+Even automatically generated noisy explanations can help.
+
+Priority 5: Add object-preserving augmentations
+
+Your current:
+
+hflip
+vflip
+transpose
+
+are good.
+
+Avoid aggressive translations for now.
+
+They often break ARC semantics.
+
+Priority 6: Use curriculum
+
+Start with tasks involving:
+
+symmetry
+color replacement
+simple object extraction
+
+Then move to:
+
+counting
+object interaction
+recursive patterns
+Priority 7: Measure intermediate success
+
+Don't only score exact match.
+
+Track:
+
+output shape correct?
+separator format correct?
+colors correct?
+connected components count correct?
+
+You may discover the model already understands much more than exact-match suggests.
+
+What I would do next
+
+Given your current stage, I would focus on:
+
+Step 1
+
+Reformat each task into:
+
+EXAMPLE 1
+INPUT...
+OUTPUT...
+
+EXAMPLE 2
+INPUT...
+OUTPUT...
+
+TEST INPUT...
+OUTPUT...
+Step 2
+
+Verify the model can overfit a single ARC task to 100%.
+
+Step 3
+
+Add connected-component extraction and include object descriptions alongside the grid.
+
+That is usually where the model starts moving from:
+
+memorizing pixel patterns
+
+to
+
+reasoning about objects and transformations.
+
+The biggest conceptual limitation of your current setup is that each grid is being presented primarily as a sequence of digits. ARC solutions are overwhelmingly expressed in terms of objects, regions, symmetries, and relations. The more directly you expose those structures, the easier it becomes for the LoRA to learn the actual rule rather than the formatting.
